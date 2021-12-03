@@ -60,12 +60,18 @@ public:
     // void SetElement(size_t row, size_t col, T&& element);
     Row operator[](size_t row);
     const ConstRow operator[](size_t row) const;
+    T& At(size_t row, size_t col);
+    const T& At(size_t row, size_t col) const;
     UniqueMatrix<T> operator+(const Matrix<T>& other) const;
     UniqueMatrix<T> operator-(const Matrix<T>& other) const;
     UniqueMatrix<T> operator*(const Matrix<T>& other) const;
+    Matrix<T>& operator+=(const Matrix<T>& other);
+    Matrix<T>& operator-=(const Matrix<T>& other);
     bool operator==(const Matrix<T>& other) const;
     virtual SharedMatrix<T> ShareMatrix
         (size_t row_base, size_t row_num, size_t col_base, size_t col_num) = 0;
+    virtual const SharedMatrix<T> ShareMatrix
+        (size_t row_base, size_t row_num, size_t col_base, size_t col_num) const = 0;
     virtual bool Valid() const = 0;
     virtual MatrixType Type() const = 0;
     size_t Rows() const;
@@ -81,6 +87,8 @@ private:
     Data Addition(const Matrix<T>& other) const;
     Data Subtraction(const Matrix<T>& other) const;
     Data Multiplication(const Matrix<T>& other) const;
+    void AdditionAssign(const Matrix<T>& other);
+    void SubtractionAssign(const Matrix<T>& other);
 
 protected:
     size_t row_num_;
@@ -103,8 +111,12 @@ public:
     ~UniqueMatrix();
     SharedMatrix<T> ShareMatrix
         (size_t row_base, size_t row_num, size_t col_base, size_t col_num);
+    const SharedMatrix<T> ShareMatrix
+        (size_t row_base, size_t row_num, size_t col_base, size_t col_num) const;
     bool Valid() const;
     MatrixType Type() const;
+    void ResizeRow(size_t num);
+    void ResizeCol(size_t num);
 
 protected:
     T& Element(size_t row, size_t col);
@@ -128,6 +140,8 @@ public:
     ~SharedMatrix();
     SharedMatrix<T> ShareMatrix
         (size_t row_base, size_t row_num, size_t col_base, size_t col_num);
+    const SharedMatrix<T> ShareMatrix
+        (size_t row_base, size_t row_num, size_t col_base, size_t col_num) const;
     bool Valid() const;
     MatrixType Type() const;
 
@@ -156,7 +170,7 @@ template <typename T>
 T& Matrix<T>::Row::operator[](size_t col)
 {
     if (col >= matrix_.col_num_ || col < 0)
-        throw std::runtime_error("invalid column index");
+        throw std::out_of_range("invalid column index");
     return matrix_.Element(row_, col);
 }
 
@@ -172,7 +186,7 @@ template <typename T>
 const T& Matrix<T>::ConstRow::operator[](size_t col) const
 {
     if (col >= matrix_.col_num_ || col < 0)
-        throw std::runtime_error("invalid column index");
+        throw std::out_of_range("invalid column index");
     return matrix_.Element(row_, col);
 }
 
@@ -182,12 +196,9 @@ typename Matrix<T>::Row Matrix<T>::operator[](size_t row)
     if (this->Valid() == false)
         throw std::runtime_error("invalid matrix");
     if (row >= this->row_num_ || row < 0)
-        throw std::runtime_error("invalid row index");
+        throw std::out_of_range("invalid row index");
     return Row(*this, row);
 }
-
-template <typename T>
-Matrix<T>::~Matrix() {}
 
 template <typename T>
 const typename Matrix<T>::ConstRow Matrix<T>::operator[](size_t row) const
@@ -195,9 +206,36 @@ const typename Matrix<T>::ConstRow Matrix<T>::operator[](size_t row) const
     if (this->Valid() == false)
         throw std::runtime_error("invalid matrix");
     if (row >= this->row_num_ || row < 0)
-        throw std::runtime_error("invalid row index");
+        throw std::out_of_range("invalid row index");
     return ConstRow(*this, row);
 }
+
+template <typename T>
+T& Matrix<T>::At(size_t row, size_t col)
+{
+    if (this->Valid() == false)
+        throw std::runtime_error("invalid matrix");
+    if (row >= this->row_num_ || row < 0)
+        throw std::out_of_range("invalid row index");
+    if (col >= this->col_num_ || col < 0)
+        throw std::out_of_range("invalid column index");
+    return Element(row, col);
+}
+
+template <typename T>
+const T& Matrix<T>::At(size_t row, size_t col) const
+{
+    if (this->Valid() == false)
+        throw std::runtime_error("invalid matrix");
+    if (row >= this->row_num_ || row < 0)
+        throw std::out_of_range("invalid row index");
+    if (col >= this->col_num_ || col < 0)
+        throw std::out_of_range("invalid column index");
+    return Element(row, col);
+}
+
+template <typename T>
+Matrix<T>::~Matrix() {}
 
 template <typename T>
 UniqueMatrix<T> Matrix<T>::operator+(const Matrix<T>& other) const
@@ -227,6 +265,28 @@ UniqueMatrix<T> Matrix<T>::operator*(const Matrix<T>& other) const
     if (this->col_num_ != other.row_num_)
         throw std::runtime_error("multiplication on matrices with invalid sizes");
     return UniqueMatrix<T>(Multiplication(other));
+}
+
+template <typename T>
+Matrix<T>& Matrix<T>::operator+=(const Matrix<T>& other)
+{
+    if (this->Valid() == false || other.Valid() == false)
+        throw std::runtime_error("invalid matrix");
+    if (this->row_num_ != other.row_num_ || this->col_num_ != other.col_num_)
+        throw std::runtime_error("addition on matrices with different sizes");
+    AdditionAssign(other);
+    return *this;
+}
+
+template <typename T>
+Matrix<T>& Matrix<T>::operator-=(const Matrix<T>& other)
+{
+    if (this->Valid() == false || other.Valid() == false)
+        throw std::runtime_error("invalid matrix");
+    if (this->row_num_ != other.row_num_ || this->col_num_ != other.col_num_)
+        throw std::runtime_error("subtraction on matrices with different sizes");
+    SubtractionAssign(other);
+    return *this;
 }
 
 template <typename T>
@@ -308,6 +368,34 @@ typename Matrix<T>::Data Matrix<T>::Multiplication(const Matrix<T>& other) const
 }
 
 template <typename T>
+void Matrix<T>::AdditionAssign(const Matrix<T>& other)
+{
+    size_t i, j;
+    Data result(this->row_num_, std::vector<T>(this->col_num_));
+    for (i = 0; i < this->row_num_; ++i)
+    {
+        for (j = 0; j < this->col_num_; ++j)
+        {
+            this->Element(i, j) += other.Element(i, j);
+        }
+    }
+}
+
+template <typename T>
+void Matrix<T>::SubtractionAssign(const Matrix<T>& other)
+{
+    size_t i, j;
+    Data result(this->row_num_, std::vector<T>(this->col_num_));
+    for (i = 0; i < this->row_num_; ++i)
+    {
+        for (j = 0; j < this->col_num_; ++j)
+        {
+            this->Element(i, j) -= other.Element(i, j);
+        }
+    }
+}
+
+template <typename T>
 UniqueMatrix<T>::UniqueMatrix(UniqueMatrix&& move)
     : data_(std::move(move.data_)), s_matrix_pool_(std::move(move.s_matrix_pool_))
 {
@@ -379,9 +467,25 @@ SharedMatrix<T> UniqueMatrix<T>::ShareMatrix
         throw std::runtime_error("invalid row_base or row_num");
     if (col_num < 0 || col_base < 0 || col_base + col_num > this->col_num_)
         throw std::runtime_error("invalid col_base or col_num");
-    SharedMatrix s_matrix(p_p_u_matrix_, row_base, row_num, col_base, col_num);
+    SharedMatrix<T> s_matrix(p_p_u_matrix_, row_base, row_num, col_base, col_num);
     s_matrix_pool_.push_front(s_matrix.p_p_s_matrix_);
     s_matrix.s_matrix_pool_it_ = s_matrix_pool_.begin();
+    return s_matrix;
+}
+
+template <typename T>
+const SharedMatrix<T> UniqueMatrix<T>::ShareMatrix
+    (size_t row_base, size_t row_num, size_t col_base, size_t col_num) const
+{
+    if (row_num < 0 || row_base < 0 || row_base + row_num > this->row_num_)
+        throw std::runtime_error("invalid row_base or row_num");
+    if (col_num < 0 || col_base < 0 || col_base + col_num > this->col_num_)
+        throw std::runtime_error("invalid col_base or col_num");
+    SharedMatrix<T> s_matrix(const_cast<UniqueMatrix<T>**>(p_p_u_matrix_), 
+        row_base, row_num, col_base, col_num);
+    const_cast<UniqueMatrix<T>*>(this)->
+        s_matrix_pool_.push_front(const_cast<SharedMatrix<T>**>(s_matrix.p_p_s_matrix_));
+    s_matrix.s_matrix_pool_it_ = const_cast<UniqueMatrix<T>*>(this)->s_matrix_pool_.begin();
     return s_matrix;
 }
 
@@ -407,6 +511,23 @@ template <typename T>
 const T& UniqueMatrix<T>::Element(size_t row, size_t col) const
 {
     return data_[row][col];
+}
+
+template <typename T>
+void UniqueMatrix<T>::ResizeRow(size_t num)
+{
+    this->row_num_ = num;
+    this->data_.resize(this->row_num_);
+}
+
+template <typename T>
+void UniqueMatrix<T>::ResizeCol(size_t num)
+{
+    this->col_num_ = num;
+    for (std::vector<T>& row : this->data_)
+    {
+        row.resize(this->col_num_);
+    }
 }
 
 template <typename T>
@@ -450,6 +571,23 @@ SharedMatrix<T> SharedMatrix<T>::ShareMatrix
     if (col_num < 0 || col_base < 0 || col_base + col_num > this->col_num_)
         throw std::runtime_error("invalid col_base or col_num");
     SharedMatrix s_matrix(p_p_u_matrix_, this->row_base_ + row_base, 
+        row_num, this->col_base_ + col_base, col_num);
+    (*p_p_u_matrix_)->s_matrix_pool_.push_front(s_matrix.p_p_s_matrix_);
+    s_matrix.s_matrix_pool_it_ = (*p_p_u_matrix_)->s_matrix_pool_.begin();
+    return s_matrix;
+}
+
+template <typename T>
+const SharedMatrix<T> SharedMatrix<T>::ShareMatrix
+    (size_t row_base, size_t row_num, size_t col_base, size_t col_num) const
+{
+    if (this->Valid() == false)
+        throw std::runtime_error("invalid matrix");
+    if (row_num < 0 || row_base < 0 || row_base + row_num > this->row_num_)
+        throw std::runtime_error("invalid row_base or row_num");
+    if (col_num < 0 || col_base < 0 || col_base + col_num > this->col_num_)
+        throw std::runtime_error("invalid col_base or col_num");
+    SharedMatrix<T> s_matrix(const_cast<UniqueMatrix<T>**>(p_p_u_matrix_), this->row_base_ + row_base, 
         row_num, this->col_base_ + col_base, col_num);
     (*p_p_u_matrix_)->s_matrix_pool_.push_front(s_matrix.p_p_s_matrix_);
     s_matrix.s_matrix_pool_it_ = (*p_p_u_matrix_)->s_matrix_pool_.begin();
