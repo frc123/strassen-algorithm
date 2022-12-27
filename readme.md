@@ -1,6 +1,6 @@
 # matrix
 
-This module is a part of [frc123/CLRS](https://github.com/frc123/CLRS)
+This module is a part of [yirong-c/CLRS](https://github.com/yirong-c/CLRS)
 
 This is a matrix library that supports operator overloading and Strassen's algorithm.
 
